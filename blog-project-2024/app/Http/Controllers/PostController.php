@@ -2,80 +2,46 @@
 
 namespace App\Http\Controllers;
 
+
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 use App\Models\Post;
-use App\Models\User;
-use App\Models\Category;
 use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use App\Jobs\SendPostNotification;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Auth;
-use Intervention\Image\ImageManager;
 use Illuminate\Database\QueryException;
-use Intervention\Image\Drivers\Gd\Driver;
 
-/**
- * PostController
- *
- * Author: Abdullah Shah
- *
- * This controller handles CRUD operations for the Post model, including image upload and resizing,
- * category assignment, and post status toggling. Intervention Image is used to manage image resizing.
- */
 class PostController extends Controller
 {
-    /**
-     * Display a listing of the posts.
-     *
-     * @return \Illuminate\View\View
-     */
-    public function index()
-    {
+    public function index() {
         $post = new Post();
         $allPosts = Post::orderBy('post_name')->get();
-        $allCategories = Category::where('status', 1)->orderBy('category_name')->get();
-        return view('backend.post.index', compact('post', 'allPosts', 'allCategories'));
+        return view('backend.post.index', compact('post', 'allPosts'));
     }
 
-
-
-    public function store(Request $request)
-    {
+    public function store(Request $request) {
         $data = $this->validatePost();
 
         try {
             DB::beginTransaction();
 
-            // Generate the slug and set the status
-            $data['post_slug'] = Str::slug($request->post_name);
-            $data['status'] = $request->publish_at ? 0 : 1;
+             // Generate the slug from the post name
+             $data['post_slug'] = Str::slug($request->post_name);
 
-            // Handle the file upload and image resizing
+            // Handle the file upload
             if ($request->hasFile('feature_image')) {
-
-                $file = $request->feature_image;
-                $fileName = time() . '.' . $file->extension();
-
-                $path = 'backend/image/' . $fileName;
-                $manager = new ImageManager(new Driver());
-                $image = $manager->read($file);
-                $image = $image->resize(150, 150);
-                $image->toJpeg(80)->save($path);
-                // $imageName = 'backend/image/' . $fileName;
-                $data['feature_image'] = $fileName;
+                $image = $request->feature_image;
+                $ext = $image->getClientOriginalExtension();
+                $imageName = time().'.'.$ext;
+                $image->move(public_path('backend/image'), $imageName);
+                $data['feature_image'] = $imageName;
             }
+            // Set the post_feature field (default to false if not checked)
+            $data['post_feature'] = $request->has('post_feature') ? true : false;
 
-
-            // Format publish_at for MySQL DATETIME format if provided
-            if ($request->publish_at) {
-                $data['publish_at'] = Carbon::parse($request->publish_at)->format('Y-m-d H:i:s');
-            }
-
-            // Create the post and attach categories
-            $post = Post::create($data);
-            $post->categories()->attach($request->category);
+            // Create a new post using the validated data
+            Post::create($data);
 
             DB::commit();
 
@@ -86,40 +52,24 @@ class PostController extends Controller
                 SendPostNotification::dispatch($post)->delay(Carbon::parse($request->publish_at));
             }
 
+            // Redirect back with a success message
             return redirect()->route('post.index')->with('success', 'Post created successfully!');
-        } catch (\Exception $e) {
+
+        } catch(\Exception $e) {
             DB::rollBack();
+
+            // Redirect back with an error message if something goes wrong
             return redirect()->back()->with('error', 'An error occurred while creating the post.')->withInput();
         }
+
     }
 
-
-
-
-
-    /**
-     * Show the form for editing the specified post.
-     *
-     * @param Post $post
-     * @return \Illuminate\View\View
-     */
-    public function edit(Post $post)
-    {
-        $allCategories = Category::orderBy('category_name')->get();
-        return view('backend.post.edit', compact('post', 'allCategories'));
+    public function edit(Post $post) {
+         return view('backend.post.edit', compact('post'));
     }
 
-    /**
-     * Update the specified post in the database.
-     *
-     * @param \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\RedirectResponse
-     */
-
-    public function update(Request $request)
-    {
-        $data = $this->validateUpdatePost();
-
+    public function update(Request $request) {
+        $data = $this->validatePost();
         try {
             DB::beginTransaction();
 
@@ -136,38 +86,37 @@ class PostController extends Controller
 
 
             // Handle the file upload and image resizing
+             // Generate the slug from the post name
+             $data['post_slug'] = Str::slug($request->post_name);
+             $post = Post::find($request->hidden_id);
+            // Handle the file upload
+
             if ($request->hasFile('feature_image')) {
                 // Get the old image path
-                $imagePath = 'backend/image/' . $post->feature_image;
+                $oldImagePath = public_path('backend/image/' . $post->feature_image);
 
-                $file = $request->feature_image;
-                $fileName = time() . '.' . $file->extension();
-                $path = 'backend/image/' . $fileName;
+                // Process the new image
+                $image = $request->file('feature_image');
+                $ext = $image->getClientOriginalExtension();
+                $imageName = time().'.'.$ext;
+                $image->move(public_path('backend/image'), $imageName);
 
-                $manager = new ImageManager(new Driver());
-                $image = $manager->read($file);
-                $image = $image->resize(150, 150);
-                $image->toJpeg(80)->save($path);
-
-                // Assign the new file name to the data array
-                $data['feature_image'] = $fileName;
+                // Assign the new image name to the data array
+                $data['feature_image'] = $imageName;
 
                 // Unlink the old image if it exists
-                if (file_exists($imagePath)) {
-                    @unlink($imagePath);
+                if (file_exists($oldImagePath)) {
+                    @unlink($oldImagePath); // Use '@' to suppress errors if file doesn't exist
                 }
             }
-
             // Set the post_feature field (default to false if not checked)
             $data['post_feature'] = $request->has('post_feature') ? true : false;
 
-            // Update the post using the validated data
-            $post->update($data);
-
-            // Sync the selected categories
-            $post->categories()->sync($request->category);
+            // Create a new post using the validated data
+            Post::find($request->hidden_id)->update($data);
 
             DB::commit();
+
 
             // Dispatch job to send notifications immediately if published, or scheduled if future date
             if ($data['status'] == 1) {
@@ -176,37 +125,32 @@ class PostController extends Controller
                 SendPostNotification::dispatch($post)->delay(Carbon::parse($request->publish_at));
             }
 
+
             // Redirect back with a success message
             return redirect()->route('post.index')->with('success', 'Post updated successfully!');
-        } catch (\Exception $e) {
+
+        } catch(\Exception $e) {
             DB::rollBack();
 
-            // Handle exception
+            // Redirect back with an error message if something goes wrong
             return redirect()->back()->with('error', 'An error occurred while updating the post.')->withInput();
         }
+
     }
 
-
-    /**
-     * Remove the specified post from the database.
-     *
-     * @param int $id
-     * @return \Illuminate\Http\RedirectResponse
-     */
-
-    public function destroy($id)
-    {
+    public function destroy($id) {
         try {
             DB::beginTransaction();
-
             // Find the post by ID
             $post = Post::findOrFail($id);
 
-            // Get the image path and delete the associated image
-            $imagePath = 'backend/image/' . $post->feature_image;
+            // Get the image path
+            $imagePath = public_path('backend/image/' . $post->feature_image);
+
+            // Unlink the image if it exists
             if (file_exists($imagePath)) {
-                @unlink($imagePath);
-            }
+            @unlink($imagePath); // Use '@' to suppress errors if file doesn't exist
+        }
 
             $post->delete();
 
@@ -218,76 +162,43 @@ class PostController extends Controller
         }
     }
 
-
-    /**
-     * Toggle the status of the post (active/inactive).
-     *
-     * @param int $id
-     * @return \Illuminate\Http\JsonResponse
-     */
-    public function status($id)
-    {
+    public function status($id) {
         try {
-            DB::beginTransaction();
+                    DB::beginTransaction();
 
-            // Find the post by ID
-            $post = Post::findOrFail($id);
+                    // Find the post by ID
+                    $post = Post::findOrFail($id);
 
-            // Toggle the status
-            $post->status = $post->status == 1 ? 0 : 1;
+                    // Toggle the status
+                    $post->status = $post->status == 1 ? 0 : 1;
 
-            // Save the updated status
-            $post->save();
+                    // Save the updated status
+                    $post->save();
 
-            DB::commit();
+                    DB::commit();
 
-            // Return a JSON response for AJAX
-            return response()->json([
-                'status' => $post->status,
-                'message' => 'Post status updated successfully.'
-            ]);
-        } catch (QueryException $ex) {
-            DB::rollBack();
-            return response()->json([
-                'error' => 'Error updating post status.'
-            ], 500);
-        }
+                    // Return a JSON response for AJAX
+                    return response()->json([
+                        'status' => $post->status,
+                        'message' => 'Post status updated successfully.'
+                    ]);
+                } catch (QueryException $ex) {
+                    DB::rollBack();
+                    return response()->json([
+                        'error' => 'Error updating post status.'
+                    ], 500);
+                }
     }
 
-    /**
-     * Validate the post input data for creating a new post.
-     *
-     * @return array
-     */
-    private function validatePost()
-    {
-        return request()->validate([
-            'post_code' => 'required|string|max:255',
-            'post_name' => 'required|string|max:255|min:3',
-            'post_summary' => 'required|string',
-            'post_details' => 'required|string',
-            'feature_image' => 'required|image|mimes:jpeg,png,jpg,gif',
-            'post_feature' => 'nullable|boolean',
-            'publish_at' => 'nullable|date', // validation for publish_at
-        ]);
-    }
-
-    /**
-     * Validate the post input data for updating an existing post.
-     *
-     * @return array
-     */
-    private function validateUpdatePost()
-    {
+    private function validatePost() {
         return request()->validate([
             'post_code' => 'required|string|max:255',
             'post_name' => 'required|string|max:255',
             'post_summary' => 'required|string',
             'post_details' => 'required|string',
-            'feature_image' => 'image|mimes:jpeg,png,jpg,gif',
+            // 'feature_image' => 'required|image|mimes:jpeg,png,jpg,gif',
+            // 'status' => 'required|in:active,inactive',
             'post_feature' => 'nullable|boolean',
-            'publish_at' => 'nullable|date', // validation for publish_at
-
         ]);
     }
     public function show($id)
