@@ -2,9 +2,13 @@
 
 namespace App\Http\Controllers;
 
+
+use Illuminate\Support\Facades\Log;
+use Carbon\Carbon;
 use App\Models\Post;
 use Illuminate\Support\Str;
 use Illuminate\Http\Request;
+use App\Jobs\SendPostNotification;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Database\QueryException;
 
@@ -41,6 +45,13 @@ class PostController extends Controller
 
             DB::commit();
 
+            // Dispatch job to send notifications immediately if published, or scheduled if future date
+            if ($data['status'] == 1) {
+                SendPostNotification::dispatch($post);
+            } elseif ($request->publish_at) {
+                SendPostNotification::dispatch($post)->delay(Carbon::parse($request->publish_at));
+            }
+
             // Redirect back with a success message
             return redirect()->route('post.index')->with('success', 'Post created successfully!');
 
@@ -62,10 +73,24 @@ class PostController extends Controller
         try {
             DB::beginTransaction();
 
+            // Generate the slug from the post name
+            $data['post_slug'] = Str::slug($request->post_name);
+            $data['status'] = $request->publish_at ? 0 : 1;
+
+            // Format publish_at for MySQL DATETIME format if provided
+            if ($request->publish_at) {
+                $data['publish_at'] = Carbon::parse($request->publish_at)->format('Y-m-d H:i:s');
+            }
+
+            $post = Post::find($request->hidden_id);
+
+
+            // Handle the file upload and image resizing
              // Generate the slug from the post name
              $data['post_slug'] = Str::slug($request->post_name);
              $post = Post::find($request->hidden_id);
             // Handle the file upload
+
             if ($request->hasFile('feature_image')) {
                 // Get the old image path
                 $oldImagePath = public_path('backend/image/' . $post->feature_image);
@@ -91,6 +116,15 @@ class PostController extends Controller
             Post::find($request->hidden_id)->update($data);
 
             DB::commit();
+
+
+            // Dispatch job to send notifications immediately if published, or scheduled if future date
+            if ($data['status'] == 1) {
+                SendPostNotification::dispatch($post);
+            } elseif ($request->publish_at) {
+                SendPostNotification::dispatch($post)->delay(Carbon::parse($request->publish_at));
+            }
+
 
             // Redirect back with a success message
             return redirect()->route('post.index')->with('success', 'Post updated successfully!');
@@ -166,5 +200,10 @@ class PostController extends Controller
             // 'status' => 'required|in:active,inactive',
             'post_feature' => 'nullable|boolean',
         ]);
+    }
+    public function show($id)
+    {
+        $post = Post::findOrFail($id);
+        return view('backend.post_details', compact('post'));
     }
 }
