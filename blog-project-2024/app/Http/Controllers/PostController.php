@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 use App\Models\Post;
 use App\Models\User;
 use App\Models\Category;
 use Illuminate\Support\Str;
 use Illuminate\Http\Request;
+use App\Jobs\SendPostNotification;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Intervention\Image\ImageManager;
@@ -77,10 +79,12 @@ class PostController extends Controller
 
             DB::commit();
 
-            // // Queue the job with the delayed execution if publish_at is set
-            // if ($post->publish_at) {
-            //     PublishPostJob::dispatch($post->id)->delay(new Carbon($post->publish_at));
-            // }
+            // Dispatch job to send notifications immediately if published, or scheduled if future date
+            if ($data['status'] == 1) {
+                SendPostNotification::dispatch($post);
+            } elseif ($request->publish_at) {
+                SendPostNotification::dispatch($post)->delay(Carbon::parse($request->publish_at));
+            }
 
             return redirect()->route('post.index')->with('success', 'Post created successfully!');
         } catch (\Exception $e) {
@@ -127,6 +131,7 @@ class PostController extends Controller
             if ($request->publish_at) {
                 $data['publish_at'] = Carbon::parse($request->publish_at)->format('Y-m-d H:i:s');
             }
+
             $post = Post::find($request->hidden_id);
 
 
@@ -163,9 +168,12 @@ class PostController extends Controller
             $post->categories()->sync($request->category);
 
             DB::commit();
-            // // Queue the job with the delayed execution if publish_at is set
-            if ($post->publish_at) {
-                PublishPostJob::dispatch($post->id)->delay(new Carbon($post->publish_at));
+
+            // Dispatch job to send notifications immediately if published, or scheduled if future date
+            if ($data['status'] == 1) {
+                SendPostNotification::dispatch($post);
+            } elseif ($request->publish_at) {
+                SendPostNotification::dispatch($post)->delay(Carbon::parse($request->publish_at));
             }
 
             // Redirect back with a success message
@@ -281,5 +289,10 @@ class PostController extends Controller
             'publish_at' => 'nullable|date', // validation for publish_at
 
         ]);
+    }
+    public function show($id)
+    {
+        $post = Post::findOrFail($id);
+        return view('backend.post_details', compact('post'));
     }
 }

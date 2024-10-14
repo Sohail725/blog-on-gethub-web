@@ -3,18 +3,28 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\PostController;
 use App\Http\Controllers\UserController;
-use App\Http\Controllers\CategoryController;
-//use SebastianBergmann\CodeCoverage\Report\Html\Dashboard;
-use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\RolesController;
+//use SebastianBergmann\CodeCoverage\Report\Html\Dashboard;
+use App\Http\Controllers\CategoryController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\SubscriberController;
 use App\Http\Controllers\UserPermissionController;
 use Laravel\Fortify\Http\Controllers\AuthenticatedSessionController;
+use Illuminate\Support\Facades\Log;
 
 
 Route::get('/', function () {
     return redirect(route('login'));
  });
 
+ // Unsubscribe route
+ Route::get('/unsubscribe/{email}', [SubscriberController::class, 'unsubscribe'])->name('unsubscribe');
+ Route::get('/post/details/{id}', [PostController::class, 'show'])->name('post.details');
+ Route::get('/track-email-open', [SubscriberController::class, 'trackEmailOpen'])->name('track.email.open');
+
+ Route::get('/test-route-load', function () {
+    return 'Web routes are loaded correctly.';
+});
 //  Route::middleware(['auth:web', 'verified'])->group(function () {
 //     // Route::get('/dashboard', function () {
 //     //     return view('dashboard');
@@ -92,10 +102,11 @@ Route::middleware(['auth:web', 'verified'])->group(function () {
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
 });
 
+
+
 Route::get('/frontend/index', function () {
     return view('frontend/index');
 });
-
 
 
 Route::get('components_list_group', function () {

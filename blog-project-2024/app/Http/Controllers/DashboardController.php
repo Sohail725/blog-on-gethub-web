@@ -1,17 +1,29 @@
 <?php
+
 namespace App\Http\Controllers;
 
-use App\Models\Category;
 use Carbon\Carbon;
 use App\Models\Post;
+use App\Models\Category;
+use App\Models\EmailOpen;
+use App\Models\Subscriber;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
-    public function index($timePeriod = 'total') {
+    public function index($timePeriod = 'total')
+    {
         $categoryCount = Category::where('status', 1)->count();
         $postCount = $this->getPostCountByPeriod($timePeriod);
-        return view('backend/dashboard', compact('postCount', 'timePeriod', 'categoryCount'));
+        $subscriberCount = Subscriber::get()->count();
+
+        // Using EmailOpen model to get open counts
+        // $openCounts = EmailOpen::select('post_id', DB::raw('count(*) as open_count'))
+        //     ->groupBy('post_id')
+        //     ->pluck('open_count', 'post_id');
+
+        return view('backend.dashboard', compact('postCount', 'timePeriod', 'categoryCount', 'subscriberCount'));
     }
 
     // Handle post counts dynamically
@@ -42,5 +54,4 @@ class DashboardController extends Controller
     {
         return $this->index($timePeriod);
     }
-
 }
